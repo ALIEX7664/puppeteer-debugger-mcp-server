@@ -1,5 +1,9 @@
 # 浏览器调试 MCP Server
 
+[![npm version](https://img.shields.io/npm/v/@aliex7664/puppeteer-debugger-mcp?style=flat-square)](https://www.npmjs.com/package/@aliex7664/puppeteer-debugger-mcp)
+[![npm downloads](https://img.shields.io/npm/dm/@aliex7664/puppeteer-debugger-mcp?style=flat-square)](https://www.npmjs.com/package/@aliex7664/puppeteer-debugger-mcp)
+[![CI](https://github.com/ALIEX7664/mcp/workflows/CI/badge.svg)](https://github.com/ALIEX7664/mcp/actions)
+
 一个基于 Puppeteer 和 Chrome DevTools Protocol (CDP) 的 MCP Server 插件，支持通过持久化浏览器连接进行调试和排查。
 
 ## 功能特性
