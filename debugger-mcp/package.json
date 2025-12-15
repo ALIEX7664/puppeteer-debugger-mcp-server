@@ -26,8 +26,8 @@
     "puppeteer"
   ],
   "author": {
-    "name": "ALIEX7664",
-    "url": "https://github.com/ALIEX7664"
+    "name": "aliex7664",
+    "url": "https://github.com/ALIEX7664/mcp/tree/main/debugger-mcp"
   },
   "publishConfig": {
     "access": "public"
