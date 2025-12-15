@@ -1,5 +1,5 @@
 {
-  "name": "puppeteer-debugger-mcp",
+  "name": "@aliex7664/puppeteer-debugger-mcp",
   "version": "1.0.0",
   "private": false,
   "description": "MCP Server for browser debugging via CDP",
@@ -28,6 +28,9 @@
   "author": {
     "name": "ALIEX7664",
     "url": "https://github.com/ALIEX7664"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "license": "MIT",
   "dependencies": {

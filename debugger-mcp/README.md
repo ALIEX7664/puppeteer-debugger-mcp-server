@@ -52,13 +52,13 @@ npm run build
   "mcpServers": {
     "puppeteer-debugger-mcp": {
       "command": "npx",
-      "args": ["-y", "puppeteer-debugger-mcp"]
+      "args": ["-y", "@aliex7664/puppeteer-debugger-mcp"]
     }
   }
 }
 ```
 
-`npx` 会自动下载并运行最新版本的 `puppeteer-debugger-mcp` 包。
+`npx` 会自动下载并运行最新版本的 `@aliex7664/puppeteer-debugger-mcp` 包。
 
 ### 本地开发方式
 
@@ -77,7 +77,7 @@ npm link
   "mcpServers": {
     "puppeteer-debugger-mcp": {
       "command": "npx",
-      "args": ["-y", "puppeteer-debugger-mcp"]
+      "args": ["-y", "@aliex7664/puppeteer-debugger-mcp"]
     }
   }
 }
@@ -90,7 +90,7 @@ npm link
   "mcpServers": {
     "puppeteer-debugger-mcp": {
       "command": "node",
-      "args": ["path/to/puppeteer-debugger-mcp/dist/index.js"]
+      "args": ["path/to/@aliex7664/puppeteer-debugger-mcp/dist/index.js"]
     }
   }
 }
