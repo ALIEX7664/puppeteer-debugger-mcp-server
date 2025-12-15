@@ -60,42 +60,6 @@ npm run build
 
 `npx` 会自动下载并运行最新版本的 `@aliex7664/puppeteer-debugger-mcp` 包。
 
-### 本地开发方式
-
-如果你在本地开发或修改了代码，可以使用以下方式：
-
-1. **使用 npm link（推荐用于本地开发）**：
-
-```bash
-# 在项目目录中
-npm install
-npm run build
-npm link
-
-# 然后在 MCP 配置中使用
-{
-  "mcpServers": {
-    "puppeteer-debugger-mcp": {
-      "command": "npx",
-      "args": ["-y", "@aliex7664/puppeteer-debugger-mcp"]
-    }
-  }
-}
-```
-
-2. **直接使用 node 运行**：
-
-```json
-{
-  "mcpServers": {
-    "puppeteer-debugger-mcp": {
-      "command": "node",
-      "args": ["path/to/@aliex7664/puppeteer-debugger-mcp/dist/index.js"]
-    }
-  }
-}
-```
-
 ## 可用工具
 
 ### 1. navigate
@@ -352,26 +316,6 @@ npm link
     "duration": 10000
   }
 }
-```
-
-## 项目结构
-
-```
-puppeteer-debugger-mcp/
-├── .nvmrc                    # Node 版本配置
-├── package.json              # 项目依赖和脚本
-├── tsconfig.json             # TypeScript 配置
-├── src/
-│   ├── index.ts              # MCP Server 入口文件
-│   ├── browser-manager.ts    # 浏览器连接管理器
-│   ├── types.ts              # TypeScript 类型定义
-│   └── cdp-handlers/         # CDP 功能处理器
-│       ├── console-handler.ts
-│       ├── element-handler.ts
-│       ├── cache-handler.ts
-│       ├── performance-handler.ts
-│       └── heap-handler.ts
-└── README.md                 # 项目说明文档
 ```
 
 ## 开发
