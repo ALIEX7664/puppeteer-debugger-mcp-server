@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'debugger-mcp/**'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'debugger-mcp/**'
+      - '.github/workflows/ci.yml'
+
+jobs:
+  test-debugger-mcp:
+    name: Test debugger-mcp
+    runs-on: ubuntu-latest
+    
+    defaults:
+      run:
+        working-directory: ./debugger-mcp
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 10.22.0
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: debugger-mcp/pnpm-lock.yaml
+      
+      - name: Install dependencies
+        run: pnpm install
+      
+      - name: Build
+        run: pnpm run build
+      
+      - name: Check build output
+        run: |
+          test -f dist/index.js || exit 1
+          echo "Build successful"
