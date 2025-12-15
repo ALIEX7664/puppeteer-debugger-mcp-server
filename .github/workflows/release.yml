@@ -45,7 +45,6 @@ jobs:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         with:
           semantic_version: 21
-          config_file: debugger-mcp/.releaserc.json
           extra_plugins: |
             @semantic-release/changelog
             @semantic-release/git
