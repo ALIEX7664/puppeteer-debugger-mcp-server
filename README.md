@@ -375,7 +375,6 @@ npm run build -- --no-clean
 3. **资源清理**：Server 关闭时会自动清理所有浏览器连接和页面。
 4. **错误处理**：所有工具调用都包含错误处理，错误信息会通过 MCP 协议返回。
 5. **Chrome 要求**：
-
    - 需要确保系统已安装 Chrome 或 Chromium
    - Windows: 默认路径 `C:\Program Files\Google\Chrome\Application\chrome.exe`
    - macOS: 默认路径 `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`
