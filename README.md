@@ -16,7 +16,7 @@
 
 ## 系统要求
 
-- Node.js 22 或更高版本
+- Node.js 20 或更高版本
 - Chrome 或 Chromium 浏览器
 
 ## 安装与配置
@@ -28,7 +28,7 @@
   "mcpServers": {
     "puppeteer-debugger-mcp": {
       "command": "npx",
-      "args": ["-y", "@aliex7664/puppeteer-debugger-mcp"]
+      "args": ["-y", "@aliex7664/puppeteer-debugger-mcp@latest"]
     }
   }
 }
