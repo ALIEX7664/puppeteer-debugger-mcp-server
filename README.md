@@ -1,9 +1,9 @@
 # 浏览器调试 MCP Server
 
 [![npm version](https://img.shields.io/npm/v/@aliex7664/puppeteer-debugger-mcp?style=flat-square)](https://www.npmjs.com/package/@aliex7664/puppeteer-debugger-mcp)
-[![CI](https://github.com/ALIEX7664/mcp/workflows/CI/badge.svg)](https://github.com/ALIEX7664/mcp/actions)
+[![CI](https://github.com/ALIEX7664/puppeteer-debugger-mcp-server/workflows/CI/badge.svg)](https://github.com/ALIEX7664/puppeteer-debugger-mcp-server/actions)
 
-一个基于 Puppeteer 和 Chrome DevTools Protocol (CDP) 的 MCP Server 插件，支持通过持久化浏览器连接进行调试和排查。
+一个基于 Puppeteer 和 Chrome DevTools Protocol (CDP) 的 MCP Server 插件，支持通过持久化浏览器连接进行网页调试、性能分析和内存检测。
 
 ## 功能特性
 
@@ -12,43 +12,16 @@
 - **缓存状态检查**：获取 LocalStorage、SessionStorage、Cookies 和 IndexedDB 状态
 - **性能数据获取**：收集 Performance Timeline 和页面加载指标
 - **内存堆栈分析**：获取堆快照、分析内存使用、跟踪对象分配、检测内存泄漏
-- **持久化连接**：浏览器实例在 Server 启动时创建，保持运行直到 Server 关闭
+- **持久化连接**：浏览器实例在 Server 启动时创建，保持运行直到 Server 关闭，提高性能
 
-## 技术栈
+## 系统要求
 
-- Node.js 22
-- TypeScript
-- Puppeteer
-- MCP SDK (@modelcontextprotocol/sdk)
+- Node.js 22 或更高版本
+- Chrome 或 Chromium 浏览器
 
-## 安装
+## 安装与配置
 
-1. 确保已安装 Node.js 22（使用 nvs 管理版本）
-
-```bash
-# 如果使用 nvs
-nvs auto
-```
-
-2. 安装依赖
-
-```bash
-npm install
-```
-
-3. 编译项目
-
-```bash
-npm run build
-```
-
-项目使用 [tsup](https://tsup.egoist.dev/) 进行构建，它基于 esbuild，比传统的 tsc 更快。
-
-## 配置
-
-### 使用 npx 方式（推荐）
-
-在 MCP 客户端配置文件中添加以下配置：
+在 MCP 客户端（如 Cursor、Claude Desktop 等）的配置文件中添加以下配置：
 
 ```json
 {
@@ -61,7 +34,7 @@ npm run build
 }
 ```
 
-`npx` 会自动下载并运行最新版本的 `@aliex7664/puppeteer-debugger-mcp` 包。
+配置完成后，重启 MCP 客户端即可使用。`npx` 会自动下载并运行最新版本的包，无需手动安装。
 
 ## 可用工具
 
@@ -248,11 +221,8 @@ npm run build
 
 ### 检查页面错误
 
-1. 导航到页面
-2. 获取 Console 错误
-
 ```json
-// 步骤 1: 导航
+// 1. 导航到页面
 {
   "name": "navigate",
   "arguments": {
@@ -260,7 +230,7 @@ npm run build
   }
 }
 
-// 步骤 2: 获取错误
+// 2. 获取 Console 错误
 {
   "name": "get_console_errors",
   "arguments": {
@@ -303,7 +273,7 @@ npm run build
   }
 }
 
-// 分析内存
+// 分析内存使用情况
 {
   "name": "analyze_memory",
   "arguments": {
@@ -311,7 +281,7 @@ npm run build
   }
 }
 
-// 跟踪分配
+// 跟踪对象分配
 {
   "name": "track_allocations",
   "arguments": {
@@ -321,65 +291,14 @@ npm run build
 }
 ```
 
-## 开发
-
-### 构建
-
-使用 tsup 构建项目：
-
-```bash
-npm run build
-```
-
-构建配置在 `tsup.config.ts` 中，主要特性：
-
-- 基于 esbuild，构建速度快
-- 自动生成 source maps（用于调试）
-- 生成 TypeScript 类型声明文件（.d.ts）
-- 保持文件结构（不打包成单个文件）
-- 启用 tree shaking（移除未使用的代码）
-
-### 开发模式（监听文件变化）
-
-```bash
-npm run dev
-```
-
-在开发模式下，tsup 会监听文件变化并自动重新构建。
-
-### 运行
-
-```bash
-npm start
-```
-
-### 构建选项
-
-tsup 支持多种构建选项，可以通过命令行参数传递：
-
-```bash
-# 压缩代码（生产环境）
-npm run build -- --minify
-
-# 只构建不生成类型声明
-npm run build -- --no-dts
-
-# 不清理输出目录
-npm run build -- --no-clean
-```
-
 ## 注意事项
 
-1. **持久化连接**：浏览器实例在 Server 启动时创建，保持运行直到 Server 关闭。所有工具调用共享同一个浏览器实例。
-2. **动态 URL**：所有工具都支持通过参数传入 URL。如果页面不存在，系统会自动创建新页面并导航到指定 URL。
-3. **资源清理**：Server 关闭时会自动清理所有浏览器连接和页面。
-4. **错误处理**：所有工具调用都包含错误处理，错误信息会通过 MCP 协议返回。
-5. **Chrome 要求**：
-   - 需要确保系统已安装 Chrome 或 Chromium
-   - Windows: 默认路径 `C:\Program Files\Google\Chrome\Application\chrome.exe`
-   - macOS: 默认路径 `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`
-   - Linux: 默认路径 `/usr/bin/google-chrome` 或 `/usr/bin/chromium-browser`
-   - 可以通过 `PUPPETEER_EXECUTABLE_PATH` 环境变量自定义路径
+- **持久化连接**：浏览器实例在 Server 启动时创建，保持运行直到 Server 关闭。所有工具调用共享同一个浏览器实例，提高性能。
+- **动态 URL**：所有工具都支持通过参数传入 URL。如果页面不存在，系统会自动创建新页面并导航到指定 URL。
+- **Chrome 路径**：如果系统未安装 Chrome 或 Chromium，或安装路径不在默认位置，可以通过 `PUPPETEER_EXECUTABLE_PATH` 环境变量指定浏览器路径：
+  - Windows: `C:\Program Files\Google\Chrome\Application\chrome.exe`
+  - macOS: `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`
+  - Linux: `/usr/bin/google-chrome` 或 `/usr/bin/chromium-browser`
 
 ## 许可证
 
