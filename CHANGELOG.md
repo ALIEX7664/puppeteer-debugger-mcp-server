@@ -1,3 +1,21 @@
+# [2.0.0](https://github.com/ALIEX7664/puppeteer-debugger-mcp-server/compare/v1.0.7...v2.0.0) (2025-12-16)
+
+
+### chore
+
+* 将 Node.js 版本要求从 22 降级到 20 ([439f094](https://github.com/ALIEX7664/puppeteer-debugger-mcp-server/commit/439f0943449560955653da00c81ee9002ded70bd))
+
+
+### BREAKING CHANGES
+
+* 最低 Node.js 版本要求从 22 降级到 20
+
+- 更新 README.md 中的系统要求
+
+- 更新 GitHub Actions 工作流中的 node-version
+
+- 更新 .nvmrc 文件
+
 ## [1.0.7](https://github.com/ALIEX7664/puppeteer-debugger-mcp-server/compare/v1.0.6...v1.0.7) (2025-12-16)
 
 
