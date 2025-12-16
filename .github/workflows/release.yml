@@ -52,6 +52,7 @@ jobs:
         run: pnpm run build
 
       - name: Release
+        id: release
         uses: cycjimmy/semantic-release-action@v4
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -61,3 +62,29 @@ jobs:
           extra_plugins: |
             @semantic-release/changelog
             @semantic-release/git
+
+      # 同步版本号到 develop 分支
+      - name: Sync version to develop
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # 获取最新的远程分支（包括 semantic-release 刚刚提交的更改）
+          git fetch origin main develop
+          
+          # 切换到 develop 分支
+          git checkout develop
+          
+          # 从远程 main 分支获取更新后的 package.json 和 CHANGELOG.md
+          git checkout origin/main -- package.json CHANGELOG.md
+          
+          # 检查是否有变更
+          if git diff --staged --quiet; then
+            echo "No version changes to sync"
+          else
+            # 提交版本同步
+            git add package.json CHANGELOG.md
+            git commit -m "chore: sync version from main [skip ci]"
+            git push origin develop
+            echo "Version synced to develop branch"
+          fi
