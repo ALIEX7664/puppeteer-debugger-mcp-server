@@ -1,3 +1,10 @@
+## [1.0.6](https://github.com/ALIEX7664/puppeteer-debugger-mcp-server/compare/v1.0.5...v1.0.6) (2025-12-16)
+
+
+### Bug Fixes
+
+* **build:** 修复 tsup 配置中的 puppeteer-core 外部依赖声明 ([9b76f69](https://github.com/ALIEX7664/puppeteer-debugger-mcp-server/commit/9b76f6980848091b5cbbf96fa6cb6e98439448df))
+
 ## [1.0.5](https://github.com/ALIEX7664/puppeteer-debugger-mcp-server/compare/v1.0.4...v1.0.5) (2025-12-16)
 
 
