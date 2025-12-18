@@ -1,3 +1,10 @@
+## [2.1.1](https://github.com/ALIEX7664/puppeteer-debugger-mcp-server/compare/v2.1.0...v2.1.1) (2025-12-18)
+
+
+### Bug Fixes
+
+* **heap:** 默认导出到 .heapsnapshot 并完善导出指引 ([4cc57f3](https://github.com/ALIEX7664/puppeteer-debugger-mcp-server/commit/4cc57f3e6d7b960d887c83ec61dd0420094cf8e0))
+
 # [2.1.0](https://github.com/ALIEX7664/puppeteer-debugger-mcp-server/compare/v2.0.0...v2.1.0) (2025-12-18)
 
 
