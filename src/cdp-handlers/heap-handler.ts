@@ -9,9 +9,9 @@ import {
 } from '../types.js';
 import { BrowserManager } from '../browser-manager.js';
 import { createWriteStream } from 'node:fs';
-import { readFile, rm, stat } from 'node:fs/promises';
+import { mkdir, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 /**
@@ -78,13 +78,40 @@ export class HeapHandler {
       const shouldReturnFile = exportMode === 'file' || exportMode === 'both';
       const shouldReturnInline = exportMode === 'inline' || exportMode === 'both';
 
-      const isTempFile =
-        !params.export?.filePath || exportMode === 'none' || exportMode === 'inline';
-      const snapshotFilePath =
-        params.export?.filePath ??
-        join(tmpdir(), `mcp-heap-${Date.now()}-${randomUUID()}.heapsnapshot.json`);
+      // 说明：我们总是需要一个文件来接收 heap snapshot chunks（用于解析）；
+      // - 当 mode 为 file/both：文件将持久化保留（默认写入当前目录下的 `./.heapsnapshot/`）
+      // - 当 mode 为 none/inline：文件仅作为临时中转（写入系统临时目录），解析后删除
+      const defaultSnapshotPath = join(
+        '.',
+        '.heapsnapshot',
+        `heap-${Date.now()}-${randomUUID()}.heapsnapshot`
+      );
+      const tempSnapshotPath = join(
+        tmpdir(),
+        `mcp-heap-${Date.now()}-${randomUUID()}.heapsnapshot`
+      );
 
+      const snapshotFilePath = shouldReturnFile
+        ? (params.export?.filePath ?? defaultSnapshotPath)
+        : tempSnapshotPath;
+
+      const isTempFile = !shouldReturnFile;
+
+      // 确保目录存在（避免 ENOENT），并避免 stream error 导致进程 Uncaught exception
+      await mkdir(dirname(snapshotFilePath), { recursive: true });
       const stream = createWriteStream(snapshotFilePath, { encoding: 'utf8' });
+
+      let streamError: Error | null = null;
+      // 注意：必须监听 error，否则 open/write 失败会触发 Uncaught exception
+      stream.on('error', (err) => {
+        streamError = err;
+      });
+
+      // 等待文件句柄打开，确保后续写入是安全的
+      await new Promise<void>((resolve, reject) => {
+        stream.once('open', () => resolve());
+        stream.once('error', (err) => reject(err));
+      });
 
       let totalReceivedBytes = 0;
       let fileBytesWritten = 0;
@@ -103,6 +130,14 @@ export class HeapHandler {
 
         // 写入文件（用于解析/可选导出 file）
         if (!snapshotTruncated) {
+          // 如果写入流已经出错，停止写入并标记
+          if (streamError) {
+            snapshotTruncated = true;
+            limitations.push(
+              `heap snapshot 写入失败：${streamError.message}（已停止写入与解析）`
+            );
+            return;
+          }
           if (totalReceivedBytes > maxSnapshotBytes) {
             snapshotTruncated = true;
             limitations.push(
@@ -174,6 +209,10 @@ export class HeapHandler {
       let topNodes: any[] | undefined;
 
       try {
+        if (streamError) {
+          // 写入失败时，跳过解析
+          throw streamError;
+        }
         const st = await stat(snapshotFilePath).catch(() => null);
         const fileSize = st?.size ?? fileBytesWritten;
 

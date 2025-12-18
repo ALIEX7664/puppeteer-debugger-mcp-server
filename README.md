@@ -150,7 +150,7 @@
 - `maxParseBytes` (number, 可选): JSON.parse 解析最大字节数，默认 50MB（超出将跳过解析）
 - `export` (object, 可选): raw snapshot 导出选项
   - `mode` ('none' | 'file' | 'inline' | 'both', 可选): 导出方式，默认 `none`
-  - `filePath` (string, 可选): file/both 模式输出路径；不填则写入系统临时目录
+  - `filePath` (string, 可选): file/both 模式输出路径；不填则默认写入当前目录下的 `./.heapsnapshot/`（服务端会自动创建目录）
   - `maxInlineBytes` (number, 可选): inline/both 模式 inline 输出最大字节数（超出截断）
 
 **示例：**
@@ -325,20 +325,6 @@
   - Windows: `C:\Program Files\Google\Chrome\Application\chrome.exe`
   - macOS: `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`
   - Linux: `/usr/bin/google-chrome` 或 `/usr/bin/chromium-browser`
-
-## 本地调试（MCP Inspector）
-
-你可以使用官方 MCP Inspector 来交互式调试本 MCP Server（基于 stdio 方式启动）。
-
-```bash
-pnpm inspector
-```
-
-如果你想在 Node 调试器里断点调试 server 进程：
-
-```bash
-pnpm inspector:debug
-```
 
 ## 许可证
 
