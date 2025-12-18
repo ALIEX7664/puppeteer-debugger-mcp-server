@@ -145,13 +145,129 @@ export interface HeapSnapshotNode {
 }
 
 /**
- * 堆快照信息
+ * Heap snapshot 导出模式
+ */
+export type HeapSnapshotExportMode = 'none' | 'file' | 'inline' | 'both';
+
+/**
+ * Heap snapshot 导出选项
+ */
+export interface HeapSnapshotExportOptions {
+  /**
+   * 导出方式：
+   * - none: 不对外导出 raw snapshot（仅返回 summary；实现上仍可能使用临时文件做解析）
+   * - file: 导出为文件并返回路径
+   * - inline: 将 raw snapshot（可能截断）直接放入返回结构
+   * - both: 同时 file + inline
+   */
+  mode?: HeapSnapshotExportMode;
+  /**
+   * 当 mode 为 file/both 时可指定输出文件路径；不指定则写入系统临时目录
+   */
+  filePath?: string;
+  /**
+   * 当 mode 为 inline/both 时，inline 输出的最大字节数（超出将截断）
+   */
+  maxInlineBytes?: number;
+}
+
+export interface HeapSnapshotTopConstructor {
+  name: string;
+  count: number;
+  selfSizeBytes: number;
+}
+
+export interface HeapSnapshotTopNode {
+  id?: number;
+  name: string;
+  type?: string;
+  selfSizeBytes: number;
+}
+
+export interface HeapSnapshotSummary {
+  /**
+   * 是否成功解析 raw heap snapshot JSON
+   */
+  parsed: boolean;
+  /**
+   * 解析得到的节点数（如果解析失败则可能缺失）
+   */
+  totalNodes?: number;
+  /**
+   * 解析得到的总 self size（字节）（如果解析失败则可能缺失）
+   */
+  totalSizeBytes?: number;
+  /**
+   * Top N 构造函数/对象名（按 selfSizeBytes 排序）
+   */
+  topConstructors?: HeapSnapshotTopConstructor[];
+  /**
+   * Top N 单体节点（按 selfSizeBytes 排序）
+   */
+  topNodes?: HeapSnapshotTopNode[];
+  /**
+   * performance.memory（仅 Chromium 支持）
+   */
+  jsHeapUsedBytes?: number;
+  jsHeapTotalBytes?: number;
+  jsHeapSizeLimitBytes?: number;
+  /**
+   * Runtime.getHeapUsage（CDP）
+   */
+  runtimeUsedSizeBytes?: number;
+  runtimeTotalSizeBytes?: number;
+}
+
+export interface HeapSnapshotExportResult {
+  mode: HeapSnapshotExportMode;
+  /**
+   * file/both 模式的导出路径（本机路径）
+   */
+  filePath?: string;
+  fileBytes?: number;
+  /**
+   * inline/both 模式的 raw snapshot（可能截断）
+   */
+  inline?: string;
+  inlineBytes?: number;
+  /**
+   * 是否发生截断（可能来自 maxSnapshotBytes 或 maxInlineBytes）
+   */
+  truncated?: boolean;
+  maxInlineBytes?: number;
+}
+
+/**
+ * 堆快照返回结果（new shape）
  */
 export interface HeapSnapshot {
-  nodes: HeapSnapshotNode[];
-  totalSize: number;
-  totalNodes: number;
   timestamp: number;
+  summary: HeapSnapshotSummary;
+  export: HeapSnapshotExportResult;
+  limitations?: string[];
+
+  /**
+   * @deprecated 兼容字段（历史返回结构）。计划在下个 major 版本移除。
+   *
+   * 说明：
+   * - 为避免 MCP 响应过大，这里的 `nodes` 可能只返回 TopN 节点（截断）。
+   * - 请迁移到 `summary.topNodes`。
+   */
+  nodes?: HeapSnapshotNode[];
+
+  /**
+   * @deprecated 兼容字段（历史返回结构）。计划在下个 major 版本移除。
+   *
+   * 请迁移到 `summary.totalSizeBytes`。
+   */
+  totalSize?: number;
+
+  /**
+   * @deprecated 兼容字段（历史返回结构）。计划在下个 major 版本移除。
+   *
+   * 请迁移到 `summary.totalNodes`。
+   */
+  totalNodes?: number;
 }
 
 /**
@@ -206,6 +322,26 @@ export interface GetPerformanceParams {
 
 export interface GetHeapSnapshotParams {
   url?: string;
+  /**
+   * Top N（构造函数/节点）数量，默认 20
+   */
+  topN?: number;
+  /**
+   * 采集前是否触发 GC，默认 false
+   */
+  collectGarbage?: boolean;
+  /**
+   * raw snapshot 导出选项
+   */
+  export?: HeapSnapshotExportOptions;
+  /**
+   * 采集 raw snapshot 的最大字节数，默认 200MB。超出将截断并跳过解析。
+   */
+  maxSnapshotBytes?: number;
+  /**
+   * 解析（JSON.parse）允许的最大字节数，默认 50MB。超出将跳过解析。
+   */
+  maxParseBytes?: number;
 }
 
 export interface AnalyzeMemoryParams {

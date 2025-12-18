@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Page for MCP Server</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+        .test-element {
+            padding: 10px;
+            margin: 10px;
+            background-color: #f0f0f0;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>Test Page for MCP Server</h1>
+    
+    <div id="test-element" class="test-element">
+        <p>This is a test element</p>
+    </div>
+    
+    <div id="clickable-element" class="test-element" style="cursor: pointer;">
+        <button>Clickable Button</button>
+    </div>
+    
+    <div id="hidden-element" class="test-element hidden">
+        Hidden Element
+    </div>
+    
+    <script>
+        // Console errors and warnings for testing
+        console.log('Test log message');
+        console.warn('Test warning message');
+        console.error('Test error message');
+        
+        // Performance testing
+        performance.mark('test-mark-start');
+        
+        // Simulate some work
+        setTimeout(() => {
+            performance.mark('test-mark-end');
+            performance.measure('test-measure', 'test-mark-start', 'test-mark-end');
+        }, 100);
+        
+        // LocalStorage for cache testing
+        localStorage.setItem('test-key', 'test-value');
+        sessionStorage.setItem('session-key', 'session-value');
+        
+        // Trigger page error for testing
+        window.addEventListener('error', (e) => {
+            console.error('Page error:', e.message);
+        });
+        
+        // Simulate layout shift for CLS testing
+        setTimeout(() => {
+            const element = document.createElement('div');
+            element.style.height = '100px';
+            document.body.appendChild(element);
+        }, 500);
+    </script>
+</body>
+</html>
+

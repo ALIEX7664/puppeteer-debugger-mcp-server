@@ -144,6 +144,14 @@
 **参数：**
 
 - `url` (string, 可选): 页面 URL
+- `topN` (number, 可选): Top N（构造函数/节点）数量，默认 20
+- `collectGarbage` (boolean, 可选): 采集前是否触发 GC，默认 false
+- `maxSnapshotBytes` (number, 可选): raw snapshot 采集最大字节数，默认 200MB（超出将截断并跳过解析）
+- `maxParseBytes` (number, 可选): JSON.parse 解析最大字节数，默认 50MB（超出将跳过解析）
+- `export` (object, 可选): raw snapshot 导出选项
+  - `mode` ('none' | 'file' | 'inline' | 'both', 可选): 导出方式，默认 `none`
+  - `filePath` (string, 可选): file/both 模式输出路径；不填则写入系统临时目录
+  - `maxInlineBytes` (number, 可选): inline/both 模式 inline 输出最大字节数（超出截断）
 
 **示例：**
 
@@ -151,10 +159,28 @@
 {
   "name": "get_heap_snapshot",
   "arguments": {
-    "url": "https://example.com"
+    "url": "https://example.com",
+    "topN": 20,
+    "export": {
+      "mode": "both",
+      "maxInlineBytes": 65536
+    }
   }
 }
 ```
+
+**返回（new shape）：**
+
+- `timestamp`: 采集时间戳
+- `summary`: 解析摘要（`parsed` 为 true 时包含 `totalNodes/totalSizeBytes/topConstructors/topNodes`）
+- `export`: raw snapshot 导出结果（file/inline/both）
+- `limitations`（可选）: 截断/跳过解析等限制说明
+
+**兼容字段（deprecated，计划下个 major 移除）：**
+
+- `totalSize`：请迁移到 `summary.totalSizeBytes`
+- `totalNodes`：请迁移到 `summary.totalNodes`
+- `nodes`：为避免响应过大，可能仅返回 TopN 节点（截断）；请迁移到 `summary.topNodes`（或使用 `export.filePath` 导出原始快照后再做离线分析）
 
 ### 7. analyze_memory
 
@@ -299,6 +325,20 @@
   - Windows: `C:\Program Files\Google\Chrome\Application\chrome.exe`
   - macOS: `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`
   - Linux: `/usr/bin/google-chrome` 或 `/usr/bin/chromium-browser`
+
+## 本地调试（MCP Inspector）
+
+你可以使用官方 MCP Inspector 来交互式调试本 MCP Server（基于 stdio 方式启动）。
+
+```bash
+pnpm inspector
+```
+
+如果你想在 Node 调试器里断点调试 server 进程：
+
+```bash
+pnpm inspector:debug
+```
 
 ## 许可证
 

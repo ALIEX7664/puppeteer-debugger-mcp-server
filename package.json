@@ -16,7 +16,15 @@
   "scripts": {
     "build": "tsup",
     "start": "node dist/index.js",
-    "dev": "tsup --watch"
+    "dev": "tsup --watch",
+    "inspector": "pnpm run build && pnpm dlx  @modelcontextprotocol/inspector node dist/index.js",
+    "inspector:debug": "pnpm run build && pnpm dlx  @modelcontextprotocol/inspector node --inspect-brk=9229 dist/index.js",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:coverage": "vitest run --coverage",
+    "test:ui": "vitest --ui",
+    "test:local": "tsx scripts/test-local.ts"
   },
   "keywords": [
     "mcp",
@@ -50,9 +58,13 @@
     "@semantic-release/changelog": "^6.0.3",
     "@semantic-release/git": "^10.0.1",
     "@types/node": "^20.0.0",
+    "@vitest/coverage-v8": "^4.0.16",
+    "@vitest/ui": "^4.0.16",
     "semantic-release": "^25.0.2",
     "tsup": "^8.0.0",
-    "typescript": "^5.0.0"
+    "tsx": "^4.21.0",
+    "typescript": "^5.0.0",
+    "vitest": "^4.0.16"
   },
   "release": {
     "branches": [
