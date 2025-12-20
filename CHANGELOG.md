@@ -1,3 +1,10 @@
+# [2.2.0](https://github.com/ALIEX7664/puppeteer-debugger-mcp-server/compare/v2.1.1...v2.2.0) (2025-12-18)
+
+
+### Features
+
+* **tools:** 输出真实分配跟踪数据并支持导出 ([06724dd](https://github.com/ALIEX7664/puppeteer-debugger-mcp-server/commit/06724dd6e27458febf0020529c57622fe12cb976))
+
 ## [2.1.1](https://github.com/ALIEX7664/puppeteer-debugger-mcp-server/compare/v2.1.0...v2.1.1) (2025-12-18)
 
 

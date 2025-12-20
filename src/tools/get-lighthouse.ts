@@ -13,14 +13,19 @@ export const getLighthouseTool: ToolDefinition = {
       .array(z.string())
       .optional()
       .describe('只分析的类别（可选，如：performance, accessibility, best-practices, seo）'),
+    skipAudits: z
+      .array(z.string())
+      .optional()
+      .describe('跳过的审计项 ID（可选，如：uses-optimized-images, render-blocking-resources）'),
   }),
   handler: async (
-    args: { url?: string; onlyCategories?: string[] },
+    args: { url?: string; onlyCategories?: string[]; skipAudits?: string[] },
     context: ToolContext
   ) => {
     const report = await context.lighthouseHandler.getLighthouseReport({
       url: args.url,
       onlyCategories: args.onlyCategories,
+      skipAudits: args.skipAudits,
     });
 
     return {

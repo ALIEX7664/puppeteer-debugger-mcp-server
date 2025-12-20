@@ -256,6 +256,65 @@
 }
 ```
 
+### 10. get_lighthouse
+
+获取 Lighthouse 性能报告（包括性能、可访问性、最佳实践、SEO 等指标）。
+
+**参数：**
+
+- `url` (string, 可选): 页面 URL（可选）
+- `onlyCategories` (string[], 可选): 只分析的类别（可选，如：`performance`, `accessibility`, `best-practices`, `seo`）
+- `skipAudits` (string[], 可选): 跳过的审计项 ID（可选，如：`uses-optimized-images`, `render-blocking-resources`）
+
+**示例：**
+
+```json
+{
+  "name": "get_lighthouse",
+  "arguments": {
+    "url": "https://example.com",
+    "onlyCategories": ["performance", "accessibility"],
+    "skipAudits": ["uses-optimized-images"]
+  }
+}
+```
+
+**返回结构：**
+
+返回的报告中包含以下字段：
+
+- `url`: 页面 URL
+- `fetchTime`: 报告生成时间
+- `userAgent`: 用户代理字符串
+- `categories`: 类别评分（根据 `onlyCategories` 参数过滤）
+  - `performance`: 性能评分
+  - `accessibility`: 可访问性评分
+  - `best-practices`: 最佳实践评分
+  - `seo`: SEO 评分
+- `metrics`: 性能指标
+  - `firstContentfulPaint`: 首次内容绘制时间
+  - `largestContentfulPaint`: 最大内容绘制时间
+  - `totalBlockingTime`: 总阻塞时间
+  - `cumulativeLayoutShift`: 累积布局偏移
+  - `speedIndex`: 速度指数
+  - `timeToInteractive`: 可交互时间
+  - `firstInputDelay`: 首次输入延迟
+  - `timeToFirstByte`: 首字节时间
+- `opportunities`: 优化建议（根据 `skipAudits` 参数过滤）
+- `diagnostics`: 诊断信息（根据 `skipAudits` 参数过滤）
+- `implementation`: 固定为 `"approximation"`，表示这是基于 Web Vitals 和 CDP 的近似实现
+- `limitations`: 限制说明数组，包含以下内容：
+  - `"accessibility/best-practices/seo 评分为近似值，非完整审计"`
+  - `"指标采集基于 Web Vitals 和 CDP，可能与真实 Lighthouse 结果有差异"`
+  - `"部分审计项可能缺失或不完整"`
+
+**注意事项：**
+
+- `onlyCategories` 参数用于过滤返回的类别，如果未指定则返回所有类别
+- `skipAudits` 参数用于跳过特定的审计项，这些审计项不会出现在 `opportunities` 和 `diagnostics` 中
+- 返回的评分和指标是基于 Web Vitals 和 CDP 的近似值，可能与真实 Lighthouse 结果有差异
+- `accessibility`、`best-practices` 和 `seo` 的评分为占位值，仅供参考
+
 ## 使用示例
 
 ### 检查页面错误
@@ -326,6 +385,36 @@
   "arguments": {
     "url": "https://example.com",
     "duration": 10000
+  }
+}
+```
+
+### Lighthouse 性能分析
+
+```json
+// 获取完整的 Lighthouse 报告
+{
+  "name": "get_lighthouse",
+  "arguments": {
+    "url": "https://example.com"
+  }
+}
+
+// 只分析性能类别
+{
+  "name": "get_lighthouse",
+  "arguments": {
+    "url": "https://example.com",
+    "onlyCategories": ["performance"]
+  }
+}
+
+// 跳过特定审计项
+{
+  "name": "get_lighthouse",
+  "arguments": {
+    "url": "https://example.com",
+    "skipAudits": ["uses-optimized-images", "render-blocking-resources"]
   }
 }
 ```

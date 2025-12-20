@@ -1,11 +1,27 @@
-import { Page } from 'puppeteer';
+import { Page, CDPSession } from 'puppeteer';
 import { BrowserManager } from '../browser-manager.js';
-
-export interface GetLighthouseParams {
-  url?: string;
-  onlyCategories?: string[];
-  skipAudits?: string[];
-}
+import {
+  GetLighthouseParams,
+  LighthouseCategory,
+  LighthouseMetrics,
+  LighthouseAudit,
+  LighthouseReport,
+  WebVitalsMetrics,
+  WebVitalsRatings,
+  PerformanceMetrics,
+} from './lighthouse-types.js';
+import {
+  WebVitalsRating,
+  WEB_VITALS_THRESHOLDS,
+  PERFORMANCE_THRESHOLDS,
+  SCORING_THRESHOLDS,
+  WAIT_TIMES,
+  LIMITATIONS,
+} from './lighthouse-constants.js';
+import {
+  calculateWebVitalsRatings,
+  createPerformanceObserver,
+} from './lighthouse-utils.js';
 
 /**
  * Lighthouse 性能分析处理器（基于 Web Vitals 和 CDP）
@@ -22,7 +38,7 @@ export class LighthouseHandler {
    */
   public async getLighthouseReport(
     params: GetLighthouseParams
-  ): Promise<any> {
+  ): Promise<LighthouseReport> {
     const page = await this.browserManager.getPage(params.url);
     const client = await page.target().createCDPSession();
 
@@ -33,47 +49,50 @@ export class LighthouseHandler {
       await client.send('Page.enable');
       await client.send('Network.enable');
 
-      // 等待页面完全加载并收集指标
-      // 给页面一些时间来完成加载和收集性能指标
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // 改进页面加载等待逻辑
+      await this.waitForPageLoad(page);
 
       // 收集 Web Vitals 指标
       const webVitals = await this.collectWebVitals(page);
-      
+
       // 收集性能指标
       const performanceMetrics = await this.collectPerformanceMetrics(page, client);
-      
+
       // 计算评分
       const scores = this.calculateScores(webVitals, performanceMetrics);
-      
-      // 获取优化建议和诊断信息
-      const opportunities = await this.getOpportunities(page, client, webVitals, performanceMetrics);
-      const diagnostics = await this.getDiagnostics(page, client, webVitals, performanceMetrics);
+
+      // 获取优化建议和诊断信息（应用 skipAudits 过滤）
+      const opportunities = await this.getOpportunities(
+        page,
+        client,
+        webVitals,
+        performanceMetrics,
+        params.skipAudits
+      );
+      const diagnostics = await this.getDiagnostics(
+        page,
+        client,
+        webVitals,
+        performanceMetrics,
+        params.skipAudits
+      );
 
       const userAgent = await page.evaluate(() => navigator.userAgent);
+
+      // 构建所有类别
+      const allCategories = this.buildCategories(scores);
+
+      // 应用 onlyCategories 过滤
+      const filteredCategories = this.filterCategories(allCategories, params.onlyCategories);
+
+      // 计算 Web Vitals 等级
+      const ratings = calculateWebVitalsRatings(webVitals);
 
       return {
         url: page.url(),
         fetchTime: new Date().toISOString(),
         userAgent,
-        categories: {
-          performance: {
-            score: scores.performance,
-            title: 'Performance',
-          },
-          accessibility: {
-            score: scores.accessibility,
-            title: 'Accessibility',
-          },
-          'best-practices': {
-            score: scores.bestPractices,
-            title: 'Best Practices',
-          },
-          seo: {
-            score: scores.seo,
-            title: 'SEO',
-          },
-        },
+        categories: filteredCategories,
         metrics: {
           firstContentfulPaint: webVitals.fcp,
           largestContentfulPaint: webVitals.lcp,
@@ -83,9 +102,12 @@ export class LighthouseHandler {
           timeToInteractive: performanceMetrics.tti,
           firstInputDelay: webVitals.fid,
           timeToFirstByte: webVitals.ttfb,
+          ratings,
         },
         opportunities: opportunities.slice(0, 10),
         diagnostics: diagnostics.slice(0, 10),
+        implementation: 'approximation',
+        limitations: [...LIMITATIONS],
       };
     } finally {
       try {
@@ -97,121 +119,281 @@ export class LighthouseHandler {
   }
 
   /**
+   * 等待页面加载完成
+   */
+  private async waitForPageLoad(page: Page): Promise<void> {
+    try {
+      // 检查页面是否已经加载完成
+      const pageState = await page.evaluate(() => {
+        const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+        return {
+          readyState: document.readyState,
+          hasNavigation: nav !== undefined,
+          loadComplete: nav ? nav.loadEventEnd > 0 : false,
+        };
+      });
+
+      if (pageState.readyState === 'complete' && pageState.hasNavigation && pageState.loadComplete) {
+        await new Promise(resolve => setTimeout(resolve, WAIT_TIMES.METRICS_STABLE));
+        return;
+      }
+
+      await Promise.race([
+        page.evaluate(() => {
+          return new Promise<void>((resolve) => {
+            if (document.readyState === 'complete') {
+              resolve();
+            } else {
+              window.addEventListener('load', () => resolve(), { once: true });
+              setTimeout(() => resolve(), WAIT_TIMES.PAGE_LOAD_TIMEOUT);
+            }
+          });
+        }),
+        new Promise(resolve => setTimeout(resolve, WAIT_TIMES.PAGE_LOAD_TIMEOUT)),
+      ]).catch(() => {
+        // Ignore errors
+      });
+
+      await new Promise(resolve => setTimeout(resolve, WAIT_TIMES.METRICS_STABLE));
+    } catch (error) {
+      await new Promise(resolve => setTimeout(resolve, WAIT_TIMES.FALLBACK_DELAY));
+    }
+  }
+
+  /**
    * 收集 Web Vitals 指标
    */
-  private async collectWebVitals(page: Page): Promise<{
-    fcp: number | null;
-    lcp: number | null;
-    fid: number | null;
-    cls: number;
-    ttfb: number | null;
-  }> {
-    return await page.evaluate(() => {
-      return new Promise<{
-        fcp: number | null;
-        lcp: number | null;
-        fid: number | null;
-        cls: number;
-        ttfb: number | null;
-      }>((resolve) => {
-        const metrics: {
-          fcp: number | null;
-          lcp: number | null;
-          fid: number | null;
-          cls: number;
-          ttfb: number | null;
-        } = {
-          fcp: null,
-          lcp: null,
-          fid: null,
-          cls: 0,
-          ttfb: null,
-        };
+  private async collectWebVitals(page: Page): Promise<WebVitalsMetrics & { ratings?: WebVitalsRatings }> {
+    const thresholds = {
+      FCP: { GOOD: WEB_VITALS_THRESHOLDS.FCP.GOOD, NEEDS_IMPROVEMENT: WEB_VITALS_THRESHOLDS.FCP.NEEDS_IMPROVEMENT },
+      LCP: { GOOD: WEB_VITALS_THRESHOLDS.LCP.GOOD, NEEDS_IMPROVEMENT: WEB_VITALS_THRESHOLDS.LCP.NEEDS_IMPROVEMENT },
+      FID: { GOOD: WEB_VITALS_THRESHOLDS.FID.GOOD, NEEDS_IMPROVEMENT: WEB_VITALS_THRESHOLDS.FID.NEEDS_IMPROVEMENT },
+      CLS: { GOOD: WEB_VITALS_THRESHOLDS.CLS.GOOD, NEEDS_IMPROVEMENT: WEB_VITALS_THRESHOLDS.CLS.NEEDS_IMPROVEMENT },
+      TTFB: { GOOD: WEB_VITALS_THRESHOLDS.TTFB.GOOD, NEEDS_IMPROVEMENT: WEB_VITALS_THRESHOLDS.TTFB.NEEDS_IMPROVEMENT },
+    };
+    const waitTimes = {
+      SHORT: WAIT_TIMES.METRICS_COLLECTION_SHORT,
+      LONG: WAIT_TIMES.METRICS_COLLECTION_LONG,
+    };
+    const ratingValues = {
+      GOOD: WebVitalsRating.GOOD,
+      NEEDS_IMPROVEMENT: WebVitalsRating.NEEDS_IMPROVEMENT,
+      POOR: WebVitalsRating.POOR,
+    };
 
-        // FCP (First Contentful Paint)
-        new PerformanceObserver((list) => {
-          for (const entry of list.getEntries()) {
-            if (entry.name === 'first-contentful-paint') {
-              metrics.fcp = entry.startTime;
+    return await page.evaluate(
+      (thresholds: any, waitTimes: any, ratingValues: any) => {
+        return new Promise<WebVitalsMetrics & { ratings?: WebVitalsRatings }>((resolve) => {
+          const metrics: WebVitalsMetrics = {
+            fcp: null,
+            lcp: null,
+            fid: null,
+            cls: 0,
+            ttfb: null,
+          };
+
+          // 创建 PerformanceObserver 的辅助函数（浏览器环境）
+          const createObserver = (
+            entryTypes: string[],
+            callback: (entries: PerformanceEntry[]) => void,
+            buffered = true
+          ): PerformanceObserver | null => {
+            try {
+              const observer = new PerformanceObserver((list) => {
+                callback(Array.from(list.getEntries()));
+              });
+              const options: PerformanceObserverInit = { entryTypes };
+              if (buffered) {
+                (options as any).buffered = true;
+              }
+              observer.observe(options);
+              return observer;
+            } catch (error) {
+              if (buffered) {
+                try {
+                  const observer = new PerformanceObserver((list) => {
+                    callback(Array.from(list.getEntries()));
+                  });
+                  observer.observe({ entryTypes });
+                  return observer;
+                } catch {
+                  return null;
+                }
+              }
+              return null;
             }
-          }
-        }).observe({ entryTypes: ['paint'] });
+          };
 
-        // LCP (Largest Contentful Paint)
-        new PerformanceObserver((list) => {
-          const entries = list.getEntries();
-          if (entries.length > 0) {
-            const lastEntry = entries[entries.length - 1] as any;
-            metrics.lcp = lastEntry.renderTime || lastEntry.loadTime;
-          }
-        }).observe({ entryTypes: ['largest-contentful-paint'] });
-
-        // CLS (Cumulative Layout Shift)
-        let clsValue = 0;
-        new PerformanceObserver((list) => {
-          for (const entry of list.getEntries() as any[]) {
-            if (!entry.hadRecentInput) {
-              clsValue += entry.value;
+          // FCP (First Contentful Paint)
+          const fcpObserver = createObserver(
+            ['paint'],
+            (entries) => {
+              for (const entry of entries) {
+                if (entry.name === 'first-contentful-paint') {
+                  metrics.fcp = entry.startTime;
+                  fcpObserver?.disconnect();
+                }
+              }
             }
-          }
-          metrics.cls = clsValue;
-        }).observe({ entryTypes: ['layout-shift'] });
+          );
 
-        // FID (First Input Delay) - 通过长任务估算
-        new PerformanceObserver((list) => {
-          for (const entry of list.getEntries() as any[]) {
-            if (entry.entryType === 'first-input' || entry.entryType === 'event') {
-              metrics.fid = entry.processingStart - entry.startTime;
+          // LCP (Largest Contentful Paint)
+          let lcpEntries: any[] = [];
+          const lcpObserver = createObserver(
+            ['largest-contentful-paint'],
+            (entries) => {
+              lcpEntries.push(...entries);
+              if (lcpEntries.length > 0) {
+                const lastEntry = lcpEntries[lcpEntries.length - 1];
+                metrics.lcp = lastEntry.renderTime || lastEntry.loadTime;
+              }
             }
+          );
+
+          // CLS (Cumulative Layout Shift)
+          let clsValue = 0;
+          const clsObserver = createObserver(
+            ['layout-shift'],
+            (entries) => {
+              for (const entry of entries as any[]) {
+                if (!entry.hadRecentInput) {
+                  clsValue += entry.value;
+                }
+              }
+              metrics.cls = clsValue;
+            }
+          );
+
+          // FID (First Input Delay) - 只监听 first-input
+          const fidObserver = createObserver(
+            ['first-input'],
+            (entries) => {
+              for (const entry of entries as any[]) {
+                if (entry.entryType === 'first-input') {
+                  metrics.fid = entry.processingStart - entry.startTime;
+                  fidObserver?.disconnect();
+                  break;
+                }
+              }
+            }
+          );
+
+          // TTFB (Time to First Byte)
+          const navigation = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming;
+          if (navigation && navigation.responseStart > 0) {
+            metrics.ttfb = navigation.responseStart - navigation.fetchStart;
           }
-        }).observe({ entryTypes: ['first-input', 'event'] });
 
-        // TTFB (Time to First Byte)
-        const navigation = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming;
-        if (navigation) {
-          metrics.ttfb = navigation.responseStart - navigation.fetchStart;
-        }
+          // 检测 LCP 是否稳定（页面卸载时停止更新）
+          window.addEventListener('beforeunload', () => {
+            if (lcpEntries.length > 0) {
+              const lastEntry = lcpEntries[lcpEntries.length - 1];
+              metrics.lcp = lastEntry.renderTime || lastEntry.loadTime;
+            }
+          }, { once: true });
 
-        // 等待一段时间收集指标
-        setTimeout(() => {
-          resolve(metrics);
-        }, 3000);
-      });
-    });
+          // 计算等级
+          const getRating = {
+            lcp: (v: number) => v <= thresholds.LCP.GOOD ? ratingValues.GOOD : v <= thresholds.LCP.NEEDS_IMPROVEMENT ? ratingValues.NEEDS_IMPROVEMENT : ratingValues.POOR,
+            fid: (v: number) => v <= thresholds.FID.GOOD ? ratingValues.GOOD : v <= thresholds.FID.NEEDS_IMPROVEMENT ? ratingValues.NEEDS_IMPROVEMENT : ratingValues.POOR,
+            cls: (v: number) => v <= thresholds.CLS.GOOD ? ratingValues.GOOD : v <= thresholds.CLS.NEEDS_IMPROVEMENT ? ratingValues.NEEDS_IMPROVEMENT : ratingValues.POOR,
+            fcp: (v: number) => v <= thresholds.FCP.GOOD ? ratingValues.GOOD : v <= thresholds.FCP.NEEDS_IMPROVEMENT ? ratingValues.NEEDS_IMPROVEMENT : ratingValues.POOR,
+            ttfb: (v: number) => v <= thresholds.TTFB.GOOD ? ratingValues.GOOD : v <= thresholds.TTFB.NEEDS_IMPROVEMENT ? ratingValues.NEEDS_IMPROVEMENT : ratingValues.POOR,
+          };
+
+          const ratings: any = {};
+          if (metrics.fcp !== null) ratings.fcp = getRating.fcp(metrics.fcp);
+          if (metrics.lcp !== null) ratings.lcp = getRating.lcp(metrics.lcp);
+          if (metrics.fid !== null) ratings.fid = getRating.fid(metrics.fid);
+          if (metrics.cls > 0) ratings.cls = getRating.cls(metrics.cls);
+          if (metrics.ttfb !== null) ratings.ttfb = getRating.ttfb(metrics.ttfb);
+
+          const hasMetrics = metrics.fcp !== null || metrics.lcp !== null || metrics.ttfb !== null;
+          const waitTime = hasMetrics ? waitTimes.SHORT : waitTimes.LONG;
+
+          setTimeout(() => {
+            resolve({ ...metrics, ratings });
+          }, waitTime);
+        });
+      },
+      thresholds,
+      waitTimes,
+      ratingValues
+    );
   }
 
   /**
    * 收集性能指标
    */
-  private async collectPerformanceMetrics(page: Page, client: any): Promise<{
-    tbt: number;
-    tti: number;
-    speedIndex: number;
-  }> {
-    // 获取长任务来计算 TBT
-    const longTasks = await page.evaluate(() => {
-      return new Promise<number>((resolve) => {
-        let tbt = 0;
-        const observer = new PerformanceObserver((list) => {
-          for (const entry of list.getEntries() as any[]) {
-            if (entry.duration > 50) {
-              tbt += entry.duration - 50;
-            }
-          }
-        });
-        
-        try {
-          observer.observe({ entryTypes: ['longtask'] });
-        } catch (e) {
-          // Longtask API 可能不支持
-        }
+  private async collectPerformanceMetrics(page: Page, client: CDPSession): Promise<PerformanceMetrics> {
+    const longTaskDuration = PERFORMANCE_THRESHOLDS.LONG_TASK_DURATION;
+    const waitTimes = {
+      SHORT: WAIT_TIMES.METRICS_COLLECTION_SHORT,
+      LONG: WAIT_TIMES.METRICS_COLLECTION_LONG,
+    };
 
-        setTimeout(() => {
-          observer.disconnect();
-          resolve(tbt);
-        }, 3000);
-      });
-    });
+    // 获取长任务来计算 TBT
+    const longTasks = await page.evaluate(
+      (longTaskDuration: number, waitTimes: any) => {
+        return new Promise<number>((resolve) => {
+          let tbt = 0;
+
+          // 创建 PerformanceObserver 的辅助函数（浏览器环境）
+          const createObserver = (
+            entryTypes: string[],
+            callback: (entries: PerformanceEntry[]) => void,
+            buffered = true
+          ): PerformanceObserver | null => {
+            try {
+              const observer = new PerformanceObserver((list) => {
+                callback(Array.from(list.getEntries()));
+              });
+              const options: PerformanceObserverInit = { entryTypes };
+              if (buffered) {
+                (options as any).buffered = true;
+              }
+              observer.observe(options);
+              return observer;
+            } catch (error) {
+              if (buffered) {
+                try {
+                  const observer = new PerformanceObserver((list) => {
+                    callback(Array.from(list.getEntries()));
+                  });
+                  observer.observe({ entryTypes });
+                  return observer;
+                } catch {
+                  return null;
+                }
+              }
+              return null;
+            }
+          };
+
+          const observer = createObserver(
+            ['longtask'],
+            (entries) => {
+              for (const entry of entries as any[]) {
+                if (entry.duration > longTaskDuration) {
+                  tbt += entry.duration - longTaskDuration;
+                }
+              }
+            }
+          );
+
+          const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming;
+          const hasMetrics = nav !== undefined;
+          const waitTime = hasMetrics ? waitTimes.SHORT : waitTimes.LONG;
+
+          setTimeout(() => {
+            observer?.disconnect();
+            resolve(tbt);
+          }, waitTime);
+        });
+      },
+      longTaskDuration,
+      waitTimes
+    );
 
     // 计算 TTI (Time to Interactive)
     const navigation = await page.evaluate(() => {
@@ -242,41 +424,35 @@ export class LighthouseHandler {
    * 计算评分
    */
   private calculateScores(
-    webVitals: { fcp: number | null; lcp: number | null; fid: number | null; cls: number; ttfb: number | null },
-    performance: { tbt: number; tti: number; speedIndex: number }
+    webVitals: WebVitalsMetrics,
+    performance: PerformanceMetrics
   ): {
     performance: number;
     accessibility: number;
     bestPractices: number;
     seo: number;
   } {
-    // 性能评分（基于 Lighthouse 评分算法）
     let perfScore = 100;
 
-    // FCP 评分 (0-1.8s = 100, 1.8-3s = 90, 3-3.8s = 50, >3.8s = 0)
     if (webVitals.fcp !== null) {
-      if (webVitals.fcp > 1800) perfScore -= 10;
-      if (webVitals.fcp > 3000) perfScore -= 40;
-      if (webVitals.fcp > 3800) perfScore -= 50;
+      if (webVitals.fcp > SCORING_THRESHOLDS.FCP.EXCELLENT) perfScore -= 10;
+      if (webVitals.fcp > SCORING_THRESHOLDS.FCP.GOOD) perfScore -= 40;
+      if (webVitals.fcp > SCORING_THRESHOLDS.FCP.FAIR) perfScore -= 50;
     }
 
-    // LCP 评分 (0-2.5s = 100, 2.5-4s = 75, >4s = 0)
     if (webVitals.lcp !== null) {
-      if (webVitals.lcp > 2500) perfScore -= 15;
-      if (webVitals.lcp > 4000) perfScore -= 60;
+      if (webVitals.lcp > SCORING_THRESHOLDS.LCP.EXCELLENT) perfScore -= 15;
+      if (webVitals.lcp > SCORING_THRESHOLDS.LCP.GOOD) perfScore -= 60;
     }
 
-    // CLS 评分 (0-0.1 = 100, 0.1-0.25 = 50, >0.25 = 0)
-    if (webVitals.cls > 0.1) perfScore -= 30;
-    if (webVitals.cls > 0.25) perfScore -= 20;
+    if (webVitals.cls > SCORING_THRESHOLDS.CLS.EXCELLENT) perfScore -= 30;
+    if (webVitals.cls > SCORING_THRESHOLDS.CLS.GOOD) perfScore -= 20;
 
-    // TBT 评分 (0-200ms = 100, 200-600ms = 50, >600ms = 0)
-    if (performance.tbt > 200) perfScore -= 30;
-    if (performance.tbt > 600) perfScore -= 20;
+    if (performance.tbt > SCORING_THRESHOLDS.TBT.EXCELLENT) perfScore -= 30;
+    if (performance.tbt > SCORING_THRESHOLDS.TBT.GOOD) perfScore -= 20;
 
-    // TTI 评分
-    if (performance.tti > 3800) perfScore -= 10;
-    if (performance.tti > 7300) perfScore -= 10;
+    if (performance.tti > PERFORMANCE_THRESHOLDS.TTI.WARNING) perfScore -= 10;
+    if (performance.tti > PERFORMANCE_THRESHOLDS.TTI.CRITICAL) perfScore -= 10;
 
     perfScore = Math.max(0, Math.min(100, perfScore));
 
@@ -306,14 +482,62 @@ export class LighthouseHandler {
   }
 
   /**
+   * 构建类别对象
+   */
+  private buildCategories(scores: {
+    performance: number;
+    accessibility: number;
+    bestPractices: number;
+    seo: number;
+  }): Record<string, LighthouseCategory> {
+    return {
+      performance: { score: scores.performance, title: 'Performance' },
+      accessibility: { score: scores.accessibility, title: 'Accessibility' },
+      'best-practices': { score: scores.bestPractices, title: 'Best Practices' },
+      seo: { score: scores.seo, title: 'SEO' },
+    };
+  }
+
+  /**
+   * 过滤类别
+   */
+  private filterCategories(
+    allCategories: Record<string, LighthouseCategory>,
+    onlyCategories?: string[]
+  ): LighthouseReport['categories'] {
+    if (!onlyCategories || onlyCategories.length === 0) {
+      return allCategories as LighthouseReport['categories'];
+    }
+
+    const filtered: LighthouseReport['categories'] = {};
+    const validCategories: Array<keyof LighthouseReport['categories']> = [
+      'performance',
+      'accessibility',
+      'best-practices',
+      'seo',
+    ];
+
+    for (const category of onlyCategories) {
+      if (validCategories.includes(category as keyof LighthouseReport['categories'])) {
+        const key = category as keyof LighthouseReport['categories'];
+        if (category in allCategories) {
+          filtered[key] = allCategories[category] as LighthouseCategory;
+        }
+      }
+    }
+    return filtered;
+  }
+
+  /**
    * 获取优化建议
    */
   private async getOpportunities(
     page: Page,
-    client: any,
-    webVitals: any,
-    performance: any
-  ): Promise<any[]> {
+    client: CDPSession,
+    webVitals: WebVitalsMetrics,
+    performance: PerformanceMetrics,
+    skipAudits?: string[]
+  ): Promise<LighthouseAudit[]> {
     const opportunities = [];
 
     // 检查图片优化
@@ -349,7 +573,7 @@ export class LighthouseHandler {
     }
 
     // 检查未压缩的资源
-    if (webVitals.ttfb && webVitals.ttfb > 600) {
+    if (webVitals.ttfb && webVitals.ttfb > WEB_VITALS_THRESHOLDS.TTFB.GOOD) {
       opportunities.push({
         id: 'render-blocking-resources',
         title: 'Reduce server response times',
@@ -361,7 +585,7 @@ export class LighthouseHandler {
     }
 
     // 检查阻塞渲染的资源
-    if (webVitals.fcp && webVitals.fcp > 1800) {
+    if (webVitals.fcp && webVitals.fcp > WEB_VITALS_THRESHOLDS.FCP.GOOD) {
       opportunities.push({
         id: 'render-blocking-resources',
         title: 'Eliminate render-blocking resources',
@@ -372,6 +596,11 @@ export class LighthouseHandler {
       });
     }
 
+    // 应用 skipAudits 过滤
+    if (skipAudits && skipAudits.length > 0) {
+      return opportunities.filter(opp => !skipAudits.includes(opp.id));
+    }
+
     return opportunities;
   }
 
@@ -380,14 +609,15 @@ export class LighthouseHandler {
    */
   private async getDiagnostics(
     page: Page,
-    client: any,
-    webVitals: any,
-    performance: any
-  ): Promise<any[]> {
+    client: CDPSession,
+    webVitals: WebVitalsMetrics,
+    performance: PerformanceMetrics,
+    skipAudits?: string[]
+  ): Promise<LighthouseAudit[]> {
     const diagnostics = [];
 
     // 诊断信息
-    if (webVitals.fcp && webVitals.fcp > 3000) {
+    if (webVitals.fcp && webVitals.fcp > SCORING_THRESHOLDS.FCP.GOOD) {
       diagnostics.push({
         id: 'render-blocking-resources',
         title: 'Reduce render-blocking resources',
@@ -396,7 +626,7 @@ export class LighthouseHandler {
       });
     }
 
-    if (webVitals.lcp && webVitals.lcp > 4000) {
+    if (webVitals.lcp && webVitals.lcp > SCORING_THRESHOLDS.LCP.GOOD) {
       diagnostics.push({
         id: 'largest-contentful-paint-element',
         title: 'Largest Contentful Paint element',
@@ -405,7 +635,7 @@ export class LighthouseHandler {
       });
     }
 
-    if (webVitals.cls > 0.25) {
+    if (webVitals.cls > WEB_VITALS_THRESHOLDS.CLS.NEEDS_IMPROVEMENT) {
       diagnostics.push({
         id: 'layout-shift-elements',
         title: 'Avoid large layout shifts',
@@ -414,13 +644,18 @@ export class LighthouseHandler {
       });
     }
 
-    if (performance.tbt > 600) {
+    if (performance.tbt > SCORING_THRESHOLDS.TBT.GOOD) {
       diagnostics.push({
         id: 'long-tasks',
         title: 'Minimize main-thread work',
         description: 'Total Blocking Time is high',
         score: 0.4,
       });
+    }
+
+    // 应用 skipAudits 过滤
+    if (skipAudits && skipAudits.length > 0) {
+      return diagnostics.filter(diag => !skipAudits.includes(diag.id));
     }
 
     return diagnostics;
