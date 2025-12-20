@@ -209,6 +209,14 @@
 
 - `url` (string, 可选): 页面 URL
 - `duration` (number, 可选): 跟踪时长（毫秒），默认 5000
+- `topN` (number, 可选): Top N（调用栈）数量，默认 20
+- `collectGarbage` (boolean, 可选): 采集前是否触发 GC，默认 false
+- `maxSnapshotBytes` (number, 可选): raw profile（带 trace 的 heap snapshot）采集最大字节数，默认 200MB
+- `maxParseBytes` (number, 可选): JSON.parse 解析最大字节数，默认 50MB
+- `export` (object, 可选): raw profile 导出选项（推荐 `file`，避免响应过大）
+  - `mode` (string, 可选): `none` | `file` | `inline` | `both`
+  - `filePath` (string, 可选): `file/both` 模式输出路径（推荐相对路径，如 `./.heapsnapshot/alloc.heapsnapshot`）
+  - `maxInlineBytes` (number, 可选): `inline/both` 模式 inline 最大字节数（超出截断）
 
 **示例：**
 
@@ -217,7 +225,12 @@
   "name": "track_allocations",
   "arguments": {
     "url": "https://example.com",
-    "duration": 10000
+    "duration": 10000,
+    "topN": 20,
+    "export": {
+      "mode": "file",
+      "filePath": "./.heapsnapshot/alloc-example.heapsnapshot"
+    }
   }
 }
 ```
@@ -242,6 +255,65 @@
   }
 }
 ```
+
+### 10. get_lighthouse
+
+获取 Lighthouse 性能报告（包括性能、可访问性、最佳实践、SEO 等指标）。
+
+**参数：**
+
+- `url` (string, 可选): 页面 URL（可选）
+- `onlyCategories` (string[], 可选): 只分析的类别（可选，如：`performance`, `accessibility`, `best-practices`, `seo`）
+- `skipAudits` (string[], 可选): 跳过的审计项 ID（可选，如：`uses-optimized-images`, `render-blocking-resources`）
+
+**示例：**
+
+```json
+{
+  "name": "get_lighthouse",
+  "arguments": {
+    "url": "https://example.com",
+    "onlyCategories": ["performance", "accessibility"],
+    "skipAudits": ["uses-optimized-images"]
+  }
+}
+```
+
+**返回结构：**
+
+返回的报告中包含以下字段：
+
+- `url`: 页面 URL
+- `fetchTime`: 报告生成时间
+- `userAgent`: 用户代理字符串
+- `categories`: 类别评分（根据 `onlyCategories` 参数过滤）
+  - `performance`: 性能评分
+  - `accessibility`: 可访问性评分
+  - `best-practices`: 最佳实践评分
+  - `seo`: SEO 评分
+- `metrics`: 性能指标
+  - `firstContentfulPaint`: 首次内容绘制时间
+  - `largestContentfulPaint`: 最大内容绘制时间
+  - `totalBlockingTime`: 总阻塞时间
+  - `cumulativeLayoutShift`: 累积布局偏移
+  - `speedIndex`: 速度指数
+  - `timeToInteractive`: 可交互时间
+  - `firstInputDelay`: 首次输入延迟
+  - `timeToFirstByte`: 首字节时间
+- `opportunities`: 优化建议（根据 `skipAudits` 参数过滤）
+- `diagnostics`: 诊断信息（根据 `skipAudits` 参数过滤）
+- `implementation`: 固定为 `"approximation"`，表示这是基于 Web Vitals 和 CDP 的近似实现
+- `limitations`: 限制说明数组，包含以下内容：
+  - `"accessibility/best-practices/seo 评分为近似值，非完整审计"`
+  - `"指标采集基于 Web Vitals 和 CDP，可能与真实 Lighthouse 结果有差异"`
+  - `"部分审计项可能缺失或不完整"`
+
+**注意事项：**
+
+- `onlyCategories` 参数用于过滤返回的类别，如果未指定则返回所有类别
+- `skipAudits` 参数用于跳过特定的审计项，这些审计项不会出现在 `opportunities` 和 `diagnostics` 中
+- 返回的评分和指标是基于 Web Vitals 和 CDP 的近似值，可能与真实 Lighthouse 结果有差异
+- `accessibility`、`best-practices` 和 `seo` 的评分为占位值，仅供参考
 
 ## 使用示例
 
@@ -313,6 +385,36 @@
   "arguments": {
     "url": "https://example.com",
     "duration": 10000
+  }
+}
+```
+
+### Lighthouse 性能分析
+
+```json
+// 获取完整的 Lighthouse 报告
+{
+  "name": "get_lighthouse",
+  "arguments": {
+    "url": "https://example.com"
+  }
+}
+
+// 只分析性能类别
+{
+  "name": "get_lighthouse",
+  "arguments": {
+    "url": "https://example.com",
+    "onlyCategories": ["performance"]
+  }
+}
+
+// 跳过特定审计项
+{
+  "name": "get_lighthouse",
+  "arguments": {
+    "url": "https://example.com",
+    "skipAudits": ["uses-optimized-images", "render-blocking-resources"]
   }
 }
 ```

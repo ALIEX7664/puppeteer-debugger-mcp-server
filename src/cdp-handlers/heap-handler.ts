@@ -3,6 +3,8 @@ import {
   HeapSnapshot,
   MemoryAnalysis,
   AllocationTracking,
+  AllocationTrackingSummary,
+  AllocationTrackingTopStack,
   GetHeapSnapshotParams,
   AnalyzeMemoryParams,
   TrackAllocationsParams,
@@ -43,6 +45,7 @@ export class HeapHandler {
       const maxParseBytes = params.maxParseBytes ?? 50 * 1024 * 1024; // 50MB
 
       const limitations: string[] = [];
+      const shouldReturnFile = exportMode === 'file' || exportMode === 'both';
 
       // 启用 HeapProfiler
       await client.send('HeapProfiler.enable');
@@ -74,132 +77,18 @@ export class HeapHandler {
         return null;
       });
 
-      // 采集 raw snapshot：默认落到临时文件（解析需要），按 mode 决定是否对外暴露
-      const shouldReturnFile = exportMode === 'file' || exportMode === 'both';
-      const shouldReturnInline = exportMode === 'inline' || exportMode === 'both';
-
-      // 说明：我们总是需要一个文件来接收 heap snapshot chunks（用于解析）；
-      // - 当 mode 为 file/both：文件将持久化保留（默认写入当前目录下的 `./.heapsnapshot/`）
-      // - 当 mode 为 none/inline：文件仅作为临时中转（写入系统临时目录），解析后删除
-      const defaultSnapshotPath = join(
-        '.',
-        '.heapsnapshot',
-        `heap-${Date.now()}-${randomUUID()}.heapsnapshot`
-      );
-      const tempSnapshotPath = join(
-        tmpdir(),
-        `mcp-heap-${Date.now()}-${randomUUID()}.heapsnapshot`
-      );
-
-      const snapshotFilePath = shouldReturnFile
-        ? (params.export?.filePath ?? defaultSnapshotPath)
-        : tempSnapshotPath;
-
-      const isTempFile = !shouldReturnFile;
-
-      // 确保目录存在（避免 ENOENT），并避免 stream error 导致进程 Uncaught exception
-      await mkdir(dirname(snapshotFilePath), { recursive: true });
-      const stream = createWriteStream(snapshotFilePath, { encoding: 'utf8' });
-
-      let streamError: Error | null = null;
-      // 注意：必须监听 error，否则 open/write 失败会触发 Uncaught exception
-      stream.on('error', (err) => {
-        streamError = err;
+      const capture = await this.captureHeapSnapshotRaw({
+        client,
+        exportMode,
+        exportFilePath: params.export?.filePath,
+        maxInlineBytes,
+        maxSnapshotBytes,
+        fileNamePrefix: 'heap',
+        limitations,
       });
 
-      // 等待文件句柄打开，确保后续写入是安全的
-      await new Promise<void>((resolve, reject) => {
-        stream.once('open', () => resolve());
-        stream.once('error', (err) => reject(err));
-      });
-
-      let totalReceivedBytes = 0;
-      let fileBytesWritten = 0;
-      let snapshotTruncated = false;
-
-      const inlineChunks: string[] = [];
-      let inlineBytes = 0;
-      let inlineTruncated = false;
-
-      const onChunk = (evt: { chunk: string }) => {
-        const chunk = evt?.chunk ?? '';
-        if (!chunk) return;
-
-        const chunkBytes = Buffer.byteLength(chunk, 'utf8');
-        totalReceivedBytes += chunkBytes;
-
-        // 写入文件（用于解析/可选导出 file）
-        if (!snapshotTruncated) {
-          // 如果写入流已经出错，停止写入并标记
-          if (streamError) {
-            snapshotTruncated = true;
-            limitations.push(
-              `heap snapshot 写入失败：${streamError.message}（已停止写入与解析）`
-            );
-            return;
-          }
-          if (totalReceivedBytes > maxSnapshotBytes) {
-            snapshotTruncated = true;
-            limitations.push(
-              `raw heap snapshot exceeded maxSnapshotBytes (${maxSnapshotBytes}) and was truncated; parsing skipped`
-            );
-          } else {
-            stream.write(chunk);
-            fileBytesWritten += chunkBytes;
-          }
-        }
-
-        // 收集 inline（可选导出）
-        if (shouldReturnInline && !inlineTruncated && inlineBytes < maxInlineBytes) {
-          // 注意：这里按字符 slice（heap snapshot 基本为 ASCII JSON），字节级精确截断的收益不大
-          const remaining = maxInlineBytes - inlineBytes;
-          const sliced = chunk.length > remaining ? chunk.slice(0, remaining) : chunk;
-          inlineChunks.push(sliced);
-          inlineBytes += Buffer.byteLength(sliced, 'utf8');
-          if (chunk.length > remaining) {
-            inlineTruncated = true;
-          }
-        } else if (shouldReturnInline && inlineBytes >= maxInlineBytes) {
-          inlineTruncated = true;
-        }
-      };
-
-      const onProgress = (_evt: any) => {
-        // 目前仅用于兼容/将来扩展；takeHeapSnapshot 结束即代表完成
-      };
-
-      // 注册 chunk/progress 监听
-      (client as any).on?.('HeapProfiler.addHeapSnapshotChunk', onChunk);
-      (client as any).on?.('HeapProfiler.reportHeapSnapshotProgress', onProgress);
-
-      // 获取堆快照（通过事件流输出 chunks）
-      await client.send('HeapProfiler.takeHeapSnapshot', {
-        reportProgress: true,
-      });
-
-      // 清理监听并关闭写入流
-      (client as any).removeListener?.('HeapProfiler.addHeapSnapshotChunk', onChunk);
-      (client as any).removeListener?.(
-        'HeapProfiler.reportHeapSnapshotProgress',
-        onProgress
-      );
-
-      await new Promise<void>((resolve, reject) => {
-        stream.end();
-        stream.once('finish', resolve);
-        stream.once('error', reject);
-      });
-
-      // 导出信息（对外）
-      const exportInfo: HeapSnapshot['export'] = {
-        mode: exportMode,
-        filePath: shouldReturnFile ? snapshotFilePath : undefined,
-        fileBytes: shouldReturnFile ? fileBytesWritten : undefined,
-        inline: shouldReturnInline ? inlineChunks.join('') : undefined,
-        inlineBytes: shouldReturnInline ? inlineBytes : undefined,
-        truncated: snapshotTruncated || inlineTruncated ? true : undefined,
-        maxInlineBytes: shouldReturnInline ? maxInlineBytes : undefined,
-      };
+      const { snapshotFilePath, isTempFile, fileBytesWritten, snapshotTruncated, streamError, exportInfo } =
+        capture;
 
       // 解析（如果未截断且体积可控）
       let parsed = false;
@@ -377,41 +266,117 @@ export class HeapHandler {
     const pageUrl = page.url();
 
     try {
+      const now = Date.now();
+      const durationMs = params.duration ?? 5000;
+      const topN = params.topN ?? 20;
+      const exportMode = params.export?.mode ?? 'none';
+      const maxInlineBytes = params.export?.maxInlineBytes ?? 64 * 1024; // 64KB
+      const maxSnapshotBytes = params.maxSnapshotBytes ?? 200 * 1024 * 1024; // 200MB
+      const maxParseBytes = params.maxParseBytes ?? 50 * 1024 * 1024; // 50MB
+
+      const limitations: string[] = [];
+      const shouldReturnFile = exportMode === 'file' || exportMode === 'both';
+
       // 启用 HeapProfiler
       await client.send('HeapProfiler.enable');
 
-      // 开始跟踪分配
+      if (params.collectGarbage) {
+        await client.send('HeapProfiler.collectGarbage').catch(() => {
+          // ignore if unsupported
+        });
+      }
+
+      const beforeUsedBytes = await this.getPerformanceMemoryUsedBytes(page);
+
+      // 开始跟踪分配（启用 allocation tracking）
       await client.send('HeapProfiler.startTrackingHeapObjects', {
         trackAllocations: true,
       });
 
       // 等待指定时间
-      const duration = params.duration || 5000;
-      await new Promise((resolve) => setTimeout(resolve, duration));
+      await new Promise((resolve) => setTimeout(resolve, durationMs));
 
-      // 停止跟踪并获取结果
+      // 采集“带 trace 的 heap snapshot”（作为 raw allocation profile）
+      const capture = await this.captureHeapSnapshotRaw({
+        client,
+        exportMode,
+        exportFilePath: params.export?.filePath,
+        maxInlineBytes,
+        maxSnapshotBytes,
+        fileNamePrefix: 'alloc',
+        limitations,
+      });
+
+      // 停止跟踪
       await client.send('HeapProfiler.stopTrackingHeapObjects', {
         reportProgress: false,
       });
 
-      // 获取分配采样数据
-      const allocations: AllocationTracking['allocations'] = [];
-      let totalAllocated = 0;
+      const { snapshotFilePath, isTempFile, fileBytesWritten, snapshotTruncated, streamError, exportInfo } =
+        capture;
 
-      // 获取堆统计
-      const heapStats = await page.evaluate(() => {
-        if ((performance as any).memory) {
-          return (performance as any).memory.usedJSHeapSize;
+      const afterUsedBytes = await this.getPerformanceMemoryUsedBytes(page);
+      const approxAllocatedBytes =
+        typeof beforeUsedBytes === 'number' && typeof afterUsedBytes === 'number'
+          ? Math.max(0, afterUsedBytes - beforeUsedBytes)
+          : 0;
+
+      let summary: AllocationTrackingSummary | undefined;
+
+      try {
+        if (streamError) {
+          throw streamError;
         }
-        return 0;
-      });
+        const st = await stat(snapshotFilePath).catch(() => null);
+        const fileSize = st?.size ?? fileBytesWritten;
 
-      totalAllocated = heapStats;
+        if (snapshotTruncated) {
+          // 已在 limitations 记录
+        } else if (fileSize > maxParseBytes) {
+          limitations.push(
+            `raw allocation profile size (${fileSize}) exceeded maxParseBytes (${maxParseBytes}); parsing skipped`
+          );
+        } else {
+          const raw = await readFile(snapshotFilePath, 'utf8');
+          const parsedTrace = this.parseV8HeapSnapshotAllocationTrace(raw, topN);
+          summary = parsedTrace;
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        limitations.push(`failed to parse allocation profile: ${msg}`);
+        summary = { parsed: false };
+      } finally {
+        // 如果不对外导出 file，则删除临时文件
+        if (!shouldReturnFile && isTempFile) {
+          await rm(snapshotFilePath, { force: true }).catch(() => {
+            // ignore
+          });
+        }
+      }
+
+      const topStacks = summary?.topStacks ?? [];
+      const legacyTimestamp = now;
+      const allocations: AllocationTracking['allocations'] = topStacks.map((s) => ({
+        size: s.sizeBytes,
+        timestamp: legacyTimestamp,
+        stackTrace: s.stackTrace,
+      }));
+
+      const totalAllocated =
+        summary?.totalAllocatedBytes ?? (approxAllocatedBytes > 0 ? approxAllocatedBytes : 0);
+      const count = summary?.totalCount ?? (allocations.length > 0 ? allocations.length : 0);
 
       const tracking: AllocationTracking = {
+        timestamp: now,
+        durationMs,
+        summary,
+        export: exportInfo,
+        limitations: limitations.length ? limitations : undefined,
+
+        // legacy fields（暂时保留）
         allocations,
         totalAllocated,
-        count: allocations.length,
+        count,
       };
 
       this.allocationTracking.set(pageUrl, tracking);
@@ -592,6 +557,331 @@ export class HeapHandler {
       totalSizeBytes,
       topConstructors,
       topNodes,
+    };
+  }
+
+  private parseV8HeapSnapshotAllocationTrace(
+    rawJson: string,
+    topN: number
+  ): AllocationTrackingSummary {
+    const data = JSON.parse(rawJson) as unknown;
+    if (!data || typeof data !== 'object') {
+      throw new Error('invalid heap snapshot structure');
+    }
+
+    const record = data as Record<string, unknown>;
+    const snapshot = record['snapshot'] as Record<string, unknown> | undefined;
+    const meta = snapshot?.['meta'] as Record<string, unknown> | undefined;
+
+    const strings = record['strings'];
+    const traceTree = record['trace_tree'];
+    const traceFunctionInfos = record['trace_function_infos'];
+
+    if (
+      !meta ||
+      !Array.isArray(strings) ||
+      !Array.isArray(traceTree) ||
+      !Array.isArray(traceFunctionInfos)
+    ) {
+      throw new Error('heap snapshot missing trace_tree/trace_function_infos');
+    }
+
+    const traceNodeFields = meta['trace_node_fields'];
+    const traceFunctionInfoFields = meta['trace_function_info_fields'];
+
+    if (!Array.isArray(traceNodeFields) || !Array.isArray(traceFunctionInfoFields)) {
+      throw new Error('heap snapshot meta missing trace_node_fields/trace_function_info_fields');
+    }
+
+    const nodeFields = traceNodeFields.map(String);
+    const fnFields = traceFunctionInfoFields.map(String);
+
+    const nodeFieldCount = nodeFields.length;
+    const fnFieldCount = fnFields.length;
+
+    if (nodeFieldCount <= 0 || fnFieldCount <= 0) {
+      throw new Error('invalid trace meta field count');
+    }
+
+    const idxFnInfo =
+      nodeFields.indexOf('function_info_index') >= 0
+        ? nodeFields.indexOf('function_info_index')
+        : nodeFields.indexOf('functionInfoIndex');
+    const idxCount = nodeFields.indexOf('count');
+    const idxSize = nodeFields.indexOf('size') >= 0 ? nodeFields.indexOf('size') : nodeFields.indexOf('size_bytes');
+    const idxChildren =
+      nodeFields.indexOf('children') >= 0
+        ? nodeFields.indexOf('children')
+        : nodeFields.indexOf('children_count') >= 0
+          ? nodeFields.indexOf('children_count')
+          : nodeFields.indexOf('childrenCount');
+
+    if (idxFnInfo < 0 || idxCount < 0 || idxSize < 0) {
+      throw new Error('trace_node_fields missing required fields');
+    }
+
+    const fnIdxName = fnFields.indexOf('name');
+    const fnIdxScriptName =
+      fnFields.indexOf('script_name') >= 0
+        ? fnFields.indexOf('script_name')
+        : fnFields.indexOf('scriptName');
+    const fnIdxLine = fnFields.indexOf('line');
+    const fnIdxColumn = fnFields.indexOf('column');
+
+    const stringTable = strings.map(String);
+    const fnInfoRaw = traceFunctionInfos.map((n) => Number(n));
+    const traceArr = traceTree.map((n) => Number(n));
+
+    const getFnLabel = (functionInfoIndex: number): string => {
+      if (functionInfoIndex < 0) return `fn#${functionInfoIndex}`;
+      const base = functionInfoIndex * fnFieldCount;
+      if (base + fnFieldCount > fnInfoRaw.length) return `fn#${functionInfoIndex}`;
+
+      const nameIndex = fnIdxName >= 0 ? fnInfoRaw[base + fnIdxName] : undefined;
+      const scriptNameIndex = fnIdxScriptName >= 0 ? fnInfoRaw[base + fnIdxScriptName] : undefined;
+      const line = fnIdxLine >= 0 ? fnInfoRaw[base + fnIdxLine] : undefined;
+      const column = fnIdxColumn >= 0 ? fnInfoRaw[base + fnIdxColumn] : undefined;
+
+      const name =
+        typeof nameIndex === 'number' ? (stringTable[nameIndex] ?? `fn#${functionInfoIndex}`) : `fn#${functionInfoIndex}`;
+      const scriptName =
+        typeof scriptNameIndex === 'number' ? (stringTable[scriptNameIndex] ?? undefined) : undefined;
+
+      if (scriptName) {
+        const lineText = typeof line === 'number' ? line : 0;
+        const colText = typeof column === 'number' ? column : 0;
+        return `${name} (${scriptName}:${lineText}:${colText})`;
+      }
+      return name;
+    };
+
+    const top: AllocationTrackingTopStack[] = [];
+    const pushTop = (item: AllocationTrackingTopStack) => {
+      if (topN <= 0) return;
+      if (top.length < topN) {
+        top.push(item);
+        top.sort((a, b) => a.sizeBytes - b.sizeBytes);
+        return;
+      }
+      if (item.sizeBytes <= top[0].sizeBytes) return;
+      top[0] = item;
+      top.sort((a, b) => a.sizeBytes - b.sizeBytes);
+    };
+
+    let cursor = 0;
+    const callStack: string[] = [];
+    const childStack: Array<number> = [];
+
+    const readNode = (): { fnLabel: string; count: number; sizeBytes: number; children: number } => {
+      if (cursor + nodeFieldCount > traceArr.length) {
+        throw new Error('trace_tree truncated');
+      }
+      const base = cursor;
+      cursor += nodeFieldCount;
+
+      const fnInfoIndex = traceArr[base + idxFnInfo] ?? 0;
+      const count = traceArr[base + idxCount] ?? 0;
+      const sizeBytes = traceArr[base + idxSize] ?? 0;
+
+      const children =
+        idxChildren >= 0
+          ? (traceArr[base + idxChildren] ?? 0)
+          : (traceArr[base + (nodeFieldCount - 1)] ?? 0);
+
+      return {
+        fnLabel: getFnLabel(fnInfoIndex),
+        count: Number(count) || 0,
+        sizeBytes: Number(sizeBytes) || 0,
+        children: Number(children) || 0,
+      };
+    };
+
+    // root node
+    const root = readNode();
+    callStack.push(root.fnLabel);
+    childStack.push(root.children);
+
+    const totalAllocatedBytes = root.sizeBytes;
+    const totalCount = root.count;
+
+    // 深度优先遍历：仅记录 leaf stacks（完整调用栈）
+    while (childStack.length > 0) {
+      const remaining = childStack[childStack.length - 1] ?? 0;
+      if (remaining <= 0) {
+        childStack.pop();
+        callStack.pop();
+        if (childStack.length > 0) {
+          childStack[childStack.length - 1] = (childStack[childStack.length - 1] ?? 0) - 1;
+        }
+        continue;
+      }
+
+      const node = readNode();
+      callStack.push(node.fnLabel);
+      childStack.push(node.children);
+
+      const isLeaf = node.children <= 0;
+      const isRoot = callStack.length <= 1;
+
+      if (!isRoot && isLeaf && node.sizeBytes > 0) {
+        const stackTrace = callStack.slice(1); // drop root
+        pushTop({ stackTrace, sizeBytes: node.sizeBytes, count: node.count });
+      }
+    }
+
+    const topStacks = top.sort((a, b) => b.sizeBytes - a.sizeBytes);
+
+    return {
+      parsed: true,
+      totalAllocatedBytes: totalAllocatedBytes > 0 ? totalAllocatedBytes : undefined,
+      totalCount: totalCount > 0 ? totalCount : undefined,
+      topStacks: topStacks.length ? topStacks : undefined,
+    };
+  }
+
+  private async getPerformanceMemoryUsedBytes(page: Page): Promise<number> {
+    const used = await page.evaluate(() => {
+      if ((performance as any).memory) {
+        return (performance as any).memory.usedJSHeapSize;
+      }
+      return 0;
+    });
+
+    return typeof used === 'number' ? used : 0;
+  }
+
+  private async captureHeapSnapshotRaw(params: {
+    client: unknown;
+    exportMode: 'none' | 'file' | 'inline' | 'both';
+    exportFilePath?: string;
+    maxInlineBytes: number;
+    maxSnapshotBytes: number;
+    fileNamePrefix: string;
+    limitations: string[];
+  }): Promise<{
+    snapshotFilePath: string;
+    isTempFile: boolean;
+    fileBytesWritten: number;
+    snapshotTruncated: boolean;
+    streamError: Error | null;
+    exportInfo: HeapSnapshot['export'];
+  }> {
+    const shouldReturnFile = params.exportMode === 'file' || params.exportMode === 'both';
+    const shouldReturnInline = params.exportMode === 'inline' || params.exportMode === 'both';
+
+    const defaultSnapshotPath = join(
+      '.',
+      '.heapsnapshot',
+      `${params.fileNamePrefix}-${Date.now()}-${randomUUID()}.heapsnapshot`
+    );
+    const tempSnapshotPath = join(
+      tmpdir(),
+      `mcp-${params.fileNamePrefix}-${Date.now()}-${randomUUID()}.heapsnapshot`
+    );
+
+    const snapshotFilePath = shouldReturnFile
+      ? (params.exportFilePath ?? defaultSnapshotPath)
+      : tempSnapshotPath;
+
+    const isTempFile = !shouldReturnFile;
+
+    await mkdir(dirname(snapshotFilePath), { recursive: true });
+    const stream = createWriteStream(snapshotFilePath, { encoding: 'utf8' });
+
+    let streamError: Error | null = null;
+    stream.on('error', (err) => {
+      streamError = err;
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      stream.once('open', () => resolve());
+      stream.once('error', (err) => reject(err));
+    });
+
+    let totalReceivedBytes = 0;
+    let fileBytesWritten = 0;
+    let snapshotTruncated = false;
+
+    const inlineChunks: string[] = [];
+    let inlineBytes = 0;
+    let inlineTruncated = false;
+
+    const eventClient = params.client as {
+      on?: (event: string, handler: (evt: { chunk: string }) => void) => void;
+      removeListener?: (event: string, handler: (evt: { chunk: string }) => void) => void;
+    };
+    const sendClient = params.client as {
+      send: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
+    };
+
+    const onChunk = (evt: { chunk: string }) => {
+      const chunk = evt?.chunk ?? '';
+      if (!chunk) return;
+
+      const chunkBytes = Buffer.byteLength(chunk, 'utf8');
+      totalReceivedBytes += chunkBytes;
+
+      if (!snapshotTruncated) {
+        if (streamError) {
+          snapshotTruncated = true;
+          params.limitations.push(
+            `heap snapshot 写入失败：${streamError.message}（已停止写入与解析）`
+          );
+          return;
+        }
+        if (totalReceivedBytes > params.maxSnapshotBytes) {
+          snapshotTruncated = true;
+          params.limitations.push(
+            `raw heap snapshot exceeded maxSnapshotBytes (${params.maxSnapshotBytes}) and was truncated; parsing skipped`
+          );
+        } else {
+          stream.write(chunk);
+          fileBytesWritten += chunkBytes;
+        }
+      }
+
+      if (shouldReturnInline && !inlineTruncated && inlineBytes < params.maxInlineBytes) {
+        const remaining = params.maxInlineBytes - inlineBytes;
+        const sliced = chunk.length > remaining ? chunk.slice(0, remaining) : chunk;
+        inlineChunks.push(sliced);
+        inlineBytes += Buffer.byteLength(sliced, 'utf8');
+        if (chunk.length > remaining) {
+          inlineTruncated = true;
+        }
+      } else if (shouldReturnInline && inlineBytes >= params.maxInlineBytes) {
+        inlineTruncated = true;
+      }
+    };
+
+    eventClient.on?.('HeapProfiler.addHeapSnapshotChunk', onChunk);
+
+    await sendClient.send('HeapProfiler.takeHeapSnapshot', { reportProgress: true });
+
+    eventClient.removeListener?.('HeapProfiler.addHeapSnapshotChunk', onChunk);
+
+    await new Promise<void>((resolve, reject) => {
+      stream.end();
+      stream.once('finish', resolve);
+      stream.once('error', reject);
+    });
+
+    const exportInfo: HeapSnapshot['export'] = {
+      mode: params.exportMode,
+      filePath: shouldReturnFile ? snapshotFilePath : undefined,
+      fileBytes: shouldReturnFile ? fileBytesWritten : undefined,
+      inline: shouldReturnInline ? inlineChunks.join('') : undefined,
+      inlineBytes: shouldReturnInline ? inlineBytes : undefined,
+      truncated: snapshotTruncated || inlineTruncated ? true : undefined,
+      maxInlineBytes: shouldReturnInline ? params.maxInlineBytes : undefined,
+    };
+
+    return {
+      snapshotFilePath,
+      isTempFile,
+      fileBytesWritten,
+      snapshotTruncated,
+      streamError,
+      exportInfo,
     };
   }
 }

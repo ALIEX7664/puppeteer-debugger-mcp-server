@@ -274,6 +274,12 @@ class MockCDPSession {
     if (method === 'HeapProfiler.enable') {
       return {};
     }
+    if (method === 'HeapProfiler.startTrackingHeapObjects') {
+      return {};
+    }
+    if (method === 'HeapProfiler.stopTrackingHeapObjects') {
+      return {};
+    }
     if (method === 'HeapProfiler.takeHeapSnapshot') {
       // Simulate heap snapshot chunk streaming
       const chunks =

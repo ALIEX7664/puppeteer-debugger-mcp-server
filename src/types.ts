@@ -286,6 +286,38 @@ export interface MemoryAnalysis {
  * 分配跟踪信息
  */
 export interface AllocationTracking {
+  /**
+   * 本次跟踪开始/结束时刻附近的时间戳（毫秒）
+   */
+  timestamp?: number;
+  /**
+   * 跟踪时长（毫秒）
+   */
+  durationMs?: number;
+
+  /**
+   * new shape：可解释的分配统计与调用栈摘要
+   */
+  summary?: AllocationTrackingSummary;
+
+  /**
+   * new shape：raw profile 导出信息。
+   *
+   * 说明：为了最大化复用与兼容，我们复用 HeapSnapshot 的 export 结构；
+   * 实际导出的内容是“带 trace 的 heap snapshot”（可在 Chrome DevTools Memory 中加载）。
+   */
+  export?: HeapSnapshotExportResult;
+
+  /**
+   * new shape：限制与降级说明
+   */
+  limitations?: string[];
+
+  /**
+   * ===== legacy fields（历史返回结构，暂时保留）=====
+   *
+   * 说明：当前实现会把 TopN 调用栈摘要映射到 `allocations`（每条代表一条 stack 的聚合）。
+   */
   allocations: Array<{
     size: number;
     timestamp: number;
@@ -293,6 +325,40 @@ export interface AllocationTracking {
   }>;
   totalAllocated: number;
   count: number;
+}
+
+export interface AllocationTrackingTopStack {
+  /**
+   * 聚合的调用栈（从 root 到 leaf 的可读栈帧）
+   */
+  stackTrace: string[];
+  /**
+   * 该调用栈累计分配的字节数
+   */
+  sizeBytes: number;
+  /**
+   * 该调用栈累计分配次数（如果可用）
+   */
+  count: number;
+}
+
+export interface AllocationTrackingSummary {
+  /**
+   * 是否成功解析 raw snapshot 的 trace_tree
+   */
+  parsed: boolean;
+  /**
+   * 解析得到的总分配字节数（如果解析失败则可能缺失）
+   */
+  totalAllocatedBytes?: number;
+  /**
+   * 解析得到的总分配次数（如果解析失败则可能缺失）
+   */
+  totalCount?: number;
+  /**
+   * TopN 调用栈摘要（按 sizeBytes 排序）
+   */
+  topStacks?: AllocationTrackingTopStack[];
 }
 
 /**
@@ -351,6 +417,26 @@ export interface AnalyzeMemoryParams {
 export interface TrackAllocationsParams {
   url?: string;
   duration?: number;
+  /**
+   * Top N（调用栈）数量，默认 20
+   */
+  topN?: number;
+  /**
+   * 采集前是否触发 GC，默认 false
+   */
+  collectGarbage?: boolean;
+  /**
+   * raw profile 导出选项（复用 heap snapshot export 结构）
+   */
+  export?: HeapSnapshotExportOptions;
+  /**
+   * raw snapshot 采集最大字节数，默认 200MB。超出将截断并跳过解析。
+   */
+  maxSnapshotBytes?: number;
+  /**
+   * JSON.parse 解析最大字节数，默认 50MB。超出将跳过解析。
+   */
+  maxParseBytes?: number;
 }
 
 export interface TakeScreenshotParams {
