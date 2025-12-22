@@ -237,21 +237,83 @@
 
 ### 9. take_screenshot
 
-截图（辅助调试）。
+截图（辅助调试）。支持智能输出模式，自动根据图片大小选择返回 base64 或保存为文件，改进的全页截图功能可正确处理懒加载内容。
 
 **参数：**
 
-- `url` (string, 可选): 页面 URL
+- `url` (string, 可选): 页面 URL（可选）
 - `fullPage` (boolean, 可选): 是否截取整页，默认 false
+- `outputMode` (string, 可选): 输出模式，默认 `auto`
+  - `auto`：根据图片大小自动选择（小图片返回 base64，大图片保存为文件）
+  - `file`：始终保存为文件，返回路径
+  - `inline`：始终返回 base64（仅用于小图片）
+- `filePath` (string, 可选): 文件保存路径（file/auto 模式使用，默认：`./screenshots/screenshot-{timestamp}-{random}.png`）
+- `maxBase64SizeKB` (number, 可选): auto 模式阈值（KB，base64 大小，默认 100KB base64 ≈ 75KB 原图）
+- `scrollDelay` (number, 可选): 滚动后等待时间（毫秒，用于触发懒加载，默认 1000）
+- `waitForSelector` (string, 可选): 等待特定选择器加载（可选）
 
 **示例：**
+
+**基本截图（视口）：**
+
+```json
+{
+  "name": "take_screenshot",
+  "arguments": {
+    "url": "https://example.com"
+  }
+}
+```
+
+**全页截图（自动输出模式）：**
 
 ```json
 {
   "name": "take_screenshot",
   "arguments": {
     "url": "https://example.com",
-    "fullPage": true
+    "fullPage": true,
+    "outputMode": "auto"
+  }
+}
+```
+
+**保存为文件：**
+
+```json
+{
+  "name": "take_screenshot",
+  "arguments": {
+    "url": "https://example.com",
+    "fullPage": true,
+    "outputMode": "file",
+    "filePath": "./screenshots/example.png"
+  }
+}
+```
+
+**返回 base64（小图片）：**
+
+```json
+{
+  "name": "take_screenshot",
+  "arguments": {
+    "url": "https://example.com",
+    "outputMode": "inline"
+  }
+}
+```
+
+**等待特定元素加载后截图：**
+
+```json
+{
+  "name": "take_screenshot",
+  "arguments": {
+    "url": "https://example.com",
+    "fullPage": true,
+    "waitForSelector": ".main-content",
+    "scrollDelay": 2000
   }
 }
 ```
