@@ -1,3 +1,11 @@
+# [2.3.0](https://github.com/ALIEX7664/puppeteer-debugger-mcp-server/compare/v2.2.0...v2.3.0) (2025-12-22)
+
+
+### Features
+
+* **screenshot:** 优化截图工具返回值控制和全页截图功能 ([5b00f8d](https://github.com/ALIEX7664/puppeteer-debugger-mcp-server/commit/5b00f8de41a64228004f01b3ada40a26b9534e7d))
+* **screenshot:** 完善截图工具功能并修复全页截图问题 ([007fb6f](https://github.com/ALIEX7664/puppeteer-debugger-mcp-server/commit/007fb6f9b8702ef7bf33b342956023c47fd6e68d))
+
 # [2.2.0](https://github.com/ALIEX7664/puppeteer-debugger-mcp-server/compare/v2.1.1...v2.2.0) (2025-12-18)
 
 
